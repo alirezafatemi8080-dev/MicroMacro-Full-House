@@ -1,8 +1,8 @@
 // ===============================
 // Bubble Sound Effect
 // ===============================
-const bubbleSound = new Audio('sounds/bubble-pop-283674.mp3');
-bubbleSound.volume = 1.0; // adjust volume
+const bubbleSound = new Audio('sounds/eraser.wav');
+bubbleSound.volume = 1.0; // set to max for testing
 
 function playBubble() {
   bubbleSound.currentTime = 0;
@@ -11,7 +11,7 @@ function playBubble() {
     .catch(err => console.log("❌ Sound play blocked:", err));
 }
 
-// Unlock sound on first touch (mobile)
+// Unlock sound on first user interaction (mobile browsers need this)
 document.body.addEventListener('touchend', () => {
   bubbleSound.play().then(() => {
     bubbleSound.pause();
@@ -64,6 +64,15 @@ if (popupYes) {
     hidePopup();
     if (typeof needsRedraw !== "undefined") needsRedraw = true;
   });
+}
+
+if (popupNo) {
+  popupNo.addEventListener('click', e => {
+    e.preventDefault();
+    playBubble();
+    hidePopup();
+  });
+}  });
 }
 
 if (popupNo) {
