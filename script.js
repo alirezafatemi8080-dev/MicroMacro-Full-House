@@ -1,40 +1,85 @@
-const map = document.getElementById("map");
-const mapContainer = document.getElementById("map-container");
-const colorButtons = document.querySelectorAll(".color");
-let selectedColor = "#ff0000";
-let markers = JSON.parse(localStorage.getItem("markers") || "[]");
+// ===============================
+// Bubble Sound Effect
+// ===============================
+const bubbleSound = new Audio('sounds/bubble-pop-283674.mp3');
+bubbleSound.volume = 0.8; // louder for mobile, adjust if needed
 
-// بارگذاری مارکرهای ذخیره‌شده
-markers.forEach(m => addMarker(m.x, m.y, m.color, false));
-
-colorButtons.forEach(btn => {
-  btn.addEventListener("click", () => {
-    selectedColor = btn.dataset.color;
+function playBubble() {
+  bubbleSound.currentTime = 0; // restart from beginning
+  bubbleSound.play().catch(err => {
+    console.log("Sound play blocked:", err);
   });
-});
+}
 
-mapContainer.addEventListener("click", e => {
-  const rect = mapContainer.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  addMarker(x, y, selectedColor, true);
-});
+// Preload sound on first user interaction (mobile browsers need this)
+document.body.addEventListener('touchstart', () => {
+  bubbleSound.play().then(() => {
+    bubbleSound.pause();
+    bubbleSound.currentTime = 0;
+  }).catch(() => {});
+}, { once: true });
 
-function addMarker(x, y, color, save) {
-  const marker = document.createElement("div");
-  marker.className = "marker";
-  marker.style.background = color;
-  marker.style.left = x + "px";
-  marker.style.top = y + "px";
+// ===============================
+// DOM Elements
+// ===============================
+const eraserBtn = document.getElementById('eraserBtn');
+const popup = document.getElementById('popup');
+const overlay = document.getElementById('overlay');
+const popupYes = document.getElementById('popupYes');
+const popupNo = document.getElementById('popupNo');
 
-  marker.addEventListener("mousedown", e => {
-    e.stopPropagation();
-    let offsetX = e.clientX - marker.offsetLeft;
-    let offsetY = e.clientY - marker.offsetTop;
+// ===============================
+// Popup Functions
+// ===============================
+function showPopup() {
+  popup.classList.add('show');
+  overlay.classList.add('show');
+  popup.setAttribute('aria-hidden', 'false');
+}
 
-    function move(ev) {
-      marker.style.left = ev.clientX - offsetX + "px";
-      marker.style.top = ev.clientY - offsetY + "px";
+function hidePopup() {
+  popup.classList.remove('show');
+  overlay.classList.remove('show');
+  popup.setAttribute('aria-hidden', 'true');
+}
+
+// ===============================
+// Event Listeners (mobile-friendly)
+// ===============================
+if (eraserBtn) {
+  eraserBtn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    playBubble();   // 🔊 play sound
+    showPopup();
+  });
+}
+
+if (popupYes) {
+  popupYes.addEventListener('touchstart', e => {
+    e.preventDefault();
+    playBubble();   // 🔊 play sound
+    // Clear markers (assuming you have markers array and saveMarkers function)
+    markers = [];
+    saveMarkers();
+    hidePopup();
+    needsRedraw = true;
+  });
+}
+
+if (popupNo) {
+  popupNo.addEventListener('touchstart', e => {
+    e.preventDefault();
+    playBubble();   // 🔊 play sound
+    hidePopup();
+  });
+}
+
+if (overlay) {
+  overlay.addEventListener('touchstart', e => {
+    e.preventDefault();
+    hidePopup();
+  });
+}      marker.style.top = ev.clientY - offsetY + "px";
     }
 
     function up(ev) {
