@@ -1,6 +1,7 @@
 // ===============================
 // Bubble Sound Effect
 // ===============================
+console.log("✅ script.js loaded");
 const bubbleSound = new Audio('sounds/bubble-pop-283674.mp3');
 bubbleSound.volume = 1.0; // test with max volume
 
