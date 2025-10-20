@@ -1,9 +1,8 @@
 // ===============================
 // Bubble Sound Effect
 // ===============================
-console.log("✅ script.js loaded");
 const bubbleSound = new Audio('sounds/bubble-pop-283674.mp3');
-bubbleSound.volume = 1.0; // test with max volume
+bubbleSound.volume = 1.0; // adjust volume
 
 function playBubble() {
   bubbleSound.currentTime = 0;
@@ -12,29 +11,68 @@ function playBubble() {
     .catch(err => console.log("❌ Sound play blocked:", err));
 }
 
-// Preload/unlock sound on first touch
-document.body.addEventListener('touchstart', () => {
+// Unlock sound on first touch (mobile)
+document.body.addEventListener('touchend', () => {
   bubbleSound.play().then(() => {
     bubbleSound.pause();
     bubbleSound.currentTime = 0;
-    console.log("🔓 Sound unlocked on mobile");
+    console.log("🔓 Sound unlocked");
   }).catch(err => console.log("Unlock failed:", err));
 }, { once: true });
 
 // ===============================
-// DOM Elements
+// DOM Elements (correct IDs)
 // ===============================
-const eraserBtn = document.getElementById('eraserBtn');
-const popup = document.getElementById('popup');
-const overlay = document.getElementById('overlay');
-const popupYes = document.getElementById('popupYes');
-const popupNo = document.getElementById('popupNo');
+const eraserBtn = document.getElementById("eraser-btn");
+const popup = document.getElementById("popup");
+const popupYes = document.getElementById("popup-yes");
+const popupNo = document.getElementById("popup-no");
 
 // ===============================
 // Popup Functions
 // ===============================
 function showPopup() {
-  popup.classList.add('show');
+  popup.style.display = "block";
+  popup.setAttribute('aria-hidden', 'false');
+}
+
+function hidePopup() {
+  popup.style.display = "none";
+  popup.setAttribute('aria-hidden', 'true');
+}
+
+// ===============================
+// Event Listeners
+// ===============================
+if (eraserBtn) {
+  eraserBtn.addEventListener('click', e => {
+    e.preventDefault();
+    playBubble();
+    showPopup();
+  });
+}
+
+if (popupYes) {
+  popupYes.addEventListener('click', e => {
+    e.preventDefault();
+    playBubble();
+    // Clear markers if you have them
+    if (typeof markers !== "undefined") {
+      markers = [];
+      if (typeof saveMarkers === "function") saveMarkers();
+    }
+    hidePopup();
+    if (typeof needsRedraw !== "undefined") needsRedraw = true;
+  });
+}
+
+if (popupNo) {
+  popupNo.addEventListener('click', e => {
+    e.preventDefault();
+    playBubble();
+    hidePopup();
+  });
+}  popup.classList.add('show');
   overlay.classList.add('show');
   popup.setAttribute('aria-hidden', 'false');
 }
