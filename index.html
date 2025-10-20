@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+  />
+  <title>MicroMacro: Full House</title>
+
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.png" type="image/png" />
+  <link rel="apple-touch-icon" href="icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="MicroMacro" />
+  <meta name="theme-color" content="#ffffff" />
+
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet" />
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #fff;
+      font-family: 'Patrick Hand', sans-serif;
+      touch-action: none;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    /* eraser button (unchanged) */
+    #eraser-btn {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: #fff;
+      border: 1px solid #000;
+      z-index: 10;
+      font-size: 16px;
+      text-align: center;
+      line-height: 60px;
+      color: #333;
+      box-shadow: 0 0 6px rgba(0,0,0,0.1);
+      user-select: none;
+    }
+
+    /* minimal white popup with black lines, doodle font inside */
+    #popup {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border: 2px solid #000;
+      border-radius: 8px;
+      padding: 14px 16px;
+      z-index: 9999;
+      display: none;
+      text-align: center;
+      min-width: 220px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+    }
+    #popup p {
+      margin: 8px 0 14px 0;
+      font-size: 18px;
+      color: #000;
+      line-height: 1.1;
+      font-family: 'Patrick Hand', sans-serif;
+    }
+    .popup-actions {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+    }
+    .popup-btn {
+      padding: 8px 16px;
+      border: 1px solid #000;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 16px;
+      cursor: pointer;
+      font-family: 'Patrick Hand', sans-serif;
+    }
+    .popup-btn:active { transform: translateY(1px); }
+  </style>
+</head>
+<body>
+  <canvas id="mapCanvas"></canvas>
+  <div id="eraser-btn">eraser</div>
+
+  <div id="popup" role="dialog" aria-modal="true" aria-hidden="true">
+    <p>remove all the marks???</p>
+    <div class="popup-actions">
+      <button class="popup-btn" id="popup-yes">yeah</button>
+      <button class="popup-btn" id="popup-no">nope</button>
+    </div>
+  </div>
+
+  <script>
+    // Canvas (CSS pixels)
+    const canvas = document.getElementById("mapCanvas");
+    const ctx = canvas.getContext("2d");
+    let canvasWidth = window.innerWidth;
+    let canvasHeight = window.innerHeight;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    // UI
+    const eraserBtn = document.getElementById("eraser-btn");
+    const popup = document.getElementById("popup");
+    const popupYes = document.getElementById("popup-yes");
+    const popupNo = document.getElementById("popup-no");
+
+    // Tiles (unchanged)
+    const TILE_ROWS = 4;
+    const TILE_COLS = 4;
+    const TILE_WIDTHS = [6477, 6477, 6477, 6480];
+    const TILE_HEIGHTS = [4408, 4408, 4408, 4410];
+    const MAP_WIDTH = TILE_WIDTHS.reduce((a,b)=>a+b,0);
+    const MAP_HEIGHT = TILE_HEIGHTS.reduce((a,b)=>a+b,0);
+
+    const tiles = new Array(TILE_ROWS * TILE_COLS);
+    let needsRedraw = true;
+    for (let i = 0; i < TILE_ROWS * TILE_COLS; i++) {
+      const img = new Image();
+      img.decoding = "async";
+      img.onload = () => { needsRedraw = true; };
+      img.onerror = () => { console.error(`Failed to load tile /map_${String(i + 1).padStart(2,'0')}.png`); };
+      img.src = `/map_${String(i + 1).padStart(2,'0')}.png`;
+      tiles[i] = img;
+    }
+
+    // View
+    let scale = 1;
+    let minScale = 1;
+    let maxScale = 3;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    // Gestures
+    let isDragging = false;
+    let dragStartX = 0, dragStartY = 0;
+    let lastDist = null;
+    let lastCenter = null; // track previous pinch center to detect pure zoom vs translate
+    let needsRecenterOnPinch = true;
+
+    // Double-tap control
+    let lastTap = 0;
+    let lastGestureTime = 0;
+    let justPinched = false;
+    const DOUBLE_TAP_WINDOW = 300;
+    const GESTURE_COOLDOWN = 250;
+    const TAP_MOVE_TOLERANCE = 8;
+    let touchStartX = 0, touchStartY = 0;
+
+    // Markers
+    let markers = [];
+    function saveMarkers(){ try{ localStorage.setItem('mapMarkers', JSON.stringify(markers)); } catch{} }
+    function loadMarkers(){ try{ const s=localStorage.getItem('mapMarkers'); if(s) markers=JSON.parse(s)||[]; } catch { markers=[]; } }
+
+    function clampOffsets(){
+      const scaledW = MAP_WIDTH * scale;
+      const scaledH = MAP_HEIGHT * scale;
+      const extraX = canvasWidth - scaledW;
+      const extraY = canvasHeight - scaledH;
+      if (scaledW <= canvasWidth) offsetX = extraX / 2;
+      else offsetX = Math.min(0, Math.max(offsetX, canvasWidth - scaledW));
+      if (scaledH <= canvasHeight) offsetY = extraY / 2;
+      else offsetY = Math.min(0, Math.max(offsetY, canvasHeight - scaledH));
+    }
+
+    function draw(){
+      clampOffsets();
+      ctx.clearRect(0,0,canvasWidth,canvasHeight);
+      ctx.save();
+      ctx.translate(offsetX, offsetY);
+      ctx.scale(scale, scale);
+
+      // cull and draw tiles
+      let y = 0;
+      for (let r = 0; r < TILE_ROWS; r++) {
+        let x = 0;
+        const h = TILE_HEIGHTS[r];
+        for (let c = 0; c < TILE_COLS; c++) {
+          const idx = r * TILE_COLS + c;
+          const img = tiles[idx];
+          const w = TILE_WIDTHS[c];
+          const screenLeft = x * scale + offsetX;
+          const screenTop = y * scale + offsetY;
+          const screenRight = (x + w) * scale + offsetX;
+          const screenBottom = (y + h) * scale + offsetY;
+          if (screenRight >= 0 && screenLeft <= canvasWidth && screenBottom >= 0 && screenTop <= canvasHeight) {
+            if (img && img.complete) ctx.drawImage(img, x, y, w, h);
+          }
+          x += w;
+        }
+        y += h;
+      }
+
+      // markers
+      markers.forEach(m=>{
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 40, 0, Math.PI*2);
+        ctx.fillStyle = "rgba(255,0,0,0.5)";
+        ctx.fill();
+      });
+
+      ctx.restore();
+    }
+
+    function loop(){
+      if (needsRedraw) { draw(); needsRedraw = false; }
+      requestAnimationFrame(loop);
+    }
+
+    function initView(){
+      const scaleX = canvasWidth / MAP_WIDTH;
+      const scaleY = canvasHeight / MAP_HEIGHT;
+      minScale = Math.min(scaleX, scaleY);
+      scale = minScale;
+      offsetX = (canvasWidth - MAP_WIDTH * scale) / 2;
+      offsetY = (canvasHeight - MAP_HEIGHT * scale) / 2;
+      needsRedraw = true;
+    }
+
+    // Touch handling: robust pinch without unwanted panning
+    canvas.addEventListener('touchstart', e=>{
+      if (e.touches.length === 1) {
+        // start pan
+        isDragging = true;
+        dragStartX = e.touches[0].clientX - offsetX;
+        dragStartY = e.touches[0].clientY - offsetY;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+      } else if (e.touches.length === 2) {
+        // start pinch: disable single-finger drag
+        isDragging = false;
+        lastDist = getTouchesDistance(e.touches[0], e.touches[1]);
+        lastCenter = getTouchesCenter(e.touches[0], e.touches[1]);
+        needsRecenterOnPinch = true; // allow first frame to set stable center
+        justPinched = true;
+      }
+    }, { passive: true });
+
+    canvas.addEventListener('touchmove', e=>{
+      if (e.touches.length === 1 && isDragging) {
+        // single-finger pan
+        offsetX = e.touches[0].clientX - dragStartX;
+        offsetY = e.touches[0].clientY - dragStartY;
+        needsRedraw = true;
+        lastGestureTime = Date.now();
+      } else if (e.touches.length === 2) {
+        e.preventDefault(); // stop page scroll
+        const t0 = e.touches[0], t1 = e.touches[1];
+        const dist = getTouchesDistance(t0, t1);
+        const center = getTouchesCenter(t0, t1);
+
+        if (lastDist != null) {
+          const prevScale = scale;
+          const zoomFactor = dist / lastDist;
+          const newScale = clamp(scale * zoomFactor, minScale, maxScale);
+
+          // World point under pinch center before scaling
+          const worldX = (center.x - offsetX) / prevScale;
+          const worldY = (center.y - offsetY) / prevScale;
+
+          // Apply new scale and keep the same world point under the center
+          scale = newScale;
+          offsetX = center.x - worldX * scale;
+          offsetY = center.y - worldY * scale;
+
+          // If the center moved a bit between frames (finger drift),
+          // do not treat that as a pan: keep focus on world point.
+          // This prevents map "sliding" when fingers drift.
+          if (needsRecenterOnPinch) {
+            // first pinch frame: lock lastCenter to current center to avoid jump
+            lastCenter = center;
+            needsRecenterOnPinch = false;
+          }
+
+          clampOffsets();
+          needsRedraw = true;
+          lastGestureTime = Date.now();
+        } else {
+          needsRecenterOnPinch = true;
+        }
+
+        lastDist = dist;
+        lastCenter = center;
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', e=>{
+      const now = Date.now();
+      if (e.touches.length === 0) {
+        isDragging = false;
+        lastDist = null;
+        lastCenter = null;
+      } else if (e.touches.length === 1) {
+        // coming from pinch to single-finger: treat carefully
+        // set dragStart so immediate small moves don't jump map
+        isDragging = true;
+        dragStartX = e.touches[0].clientX - offsetX;
+        dragStartY = e.touches[0].clientY - offsetY;
+      }
+
+      // prevent accidental double-tap after gestures
+      const sinceGesture = now - lastGestureTime;
+      if (sinceGesture < GESTURE_COOLDOWN || justPinched) {
+        justPinched = false;
+        lastTap = now;
+        return;
+      }
+
+      // handle double-tap (single finger, small movement)
+      if (e.changedTouches.length === 1) {
+        const t = e.changedTouches[0];
+        const moved = Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY);
+        if (moved <= TAP_MOVE_TOLERANCE) {
+          if (now - lastTap < DOUBLE_TAP_WINDOW) {
+            // toggle marker
+            const x = (t.clientX - offsetX) / scale;
+            const y = (t.clientY - offsetY) / scale;
+            const idx = markers.findIndex(m => Math.hypot(m.x - x, m.y - y) < 45);
+            if (idx !== -1) markers.splice(idx, 1);
+            else markers.push({ x, y });
+            saveMarkers();
+            needsRedraw = true;
+          }
+          lastTap = now;
+        } else {
+          lastTap = now;
+        }
+      }
+    });
+
+    // Helpers
+    function getTouchesDistance(a,b){
+      const dx = a.clientX - b.clientX;
+      const dy = a.clientY - b.clientY;
+      return Math.sqrt(dx*dx + dy*dy);
+    }
+    function getTouchesCenter(a,b){
+      return { x: (a.clientX + b.clientX)/2, y: (a.clientY + b.clientY)/2 };
+    }
+    function clamp(v,min,max){ return Math.max(min, Math.min(v, max)); }
+
+    // Resize
+    window.addEventListener('resize', ()=>{
+      canvasWidth = window.innerWidth;
+      canvasHeight = window.innerHeight;
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+      needsRedraw = true;
+      initView();
+    });
+
+    // Eraser popup behavior (minimal white popup, doodle font already set)
+    eraserBtn.addEventListener('click', ()=>{
+      popup.style.display = 'block';
+      popup.setAttribute('aria-hidden', 'false');
+    });
+    popupYes.addEventListener('click', ()=>{
+      // remove all red markers and refresh
+      markers = [];
+      saveMarkers();
+      popup.style.display = 'none';
+      popup.setAttribute('aria-hidden', 'true');
+      needsRedraw = true;
+    });
+    popupNo.addEventListener('click', ()=>{
+      popup.style.display = 'none';
+      popup.setAttribute('aria-hidden', 'true');
+    });
+
+    // Service worker optional
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js').catch(()=>{});
+    }
+
+    // Start
+    function start(){
+      loadMarkers();
+      initView();
+      loop();
+    }
+    start();
+  </script>
+</body>
+</html>
+```[43dcd9a7-70db-4a1f-b0ae-981daa162054](https://github.com/TaiAiAc/taiaiac_blog.github.io/tree/2d0e91d7de31888b10a81056afc1fc9fff39fb6d/source%2F_posts%2F%E7%A7%BB%E5%8A%A8%E7%AB%AF%2F%E6%8F%92%E4%BB%B6.md?citationMarker=43dcd9a7-70db-4a1f-b0ae-981daa162054 "1")[43dcd9a7-70db-4a1f-b0ae-981daa162054](https://github.com/amitwh/website/tree/d1c735c2eea6a2fcbeb0a323757cd0d958484102/docs%2Flucidlp%2Fheader.php?citationMarker=43dcd9a7-70db-4a1f-b0ae-981daa162054 "2")[43dcd9a7-70db-4a1f-b0ae-981daa162054](https://github.com/MetamediaTechnology/longdo-map-react-native/tree/b29261a2f9b44d6ed7e3bfe3ce5628b773fb53a4/src%2FMapView.js?citationMarker=43dcd9a7-70db-4a1f-b0ae-981daa162054 "3")
